@@ -1,0 +1,161 @@
+name: Buildroot QEMU x86_64
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Buildroot x86_64
+    runs-on: ubuntu-latest
+
+    steps:
+      # ------------------------------------------------------------
+      # Checkout Buildroot
+      # ------------------------------------------------------------
+      - name: Checkout Buildroot
+        uses: actions/checkout@v4
+        with:
+          repository: buildroot/buildroot
+          ref: 2026.05.2
+          fetch-depth: 1
+
+      # ------------------------------------------------------------
+      # Install Buildroot build dependencies
+      # ------------------------------------------------------------
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+
+          sudo apt-get install -y \
+            bc \
+            bison \
+            build-essential \
+            cpio \
+            file \
+            flex \
+            git \
+            libelf-dev \
+            libncurses-dev \
+            rsync \
+            unzip \
+            wget \
+            xz-utils
+
+      # ------------------------------------------------------------
+      # Configure Buildroot
+      # ------------------------------------------------------------
+      - name: Configure Buildroot
+        run: |
+          make qemu_x86_64_defconfig
+
+      # ------------------------------------------------------------
+      # Build
+      # ------------------------------------------------------------
+      - name: Build Buildroot
+        run: |
+          make -j"$(nproc)"
+
+      # ------------------------------------------------------------
+      # Collect build information
+      # ------------------------------------------------------------
+      - name: Collect build information
+        run: |
+          mkdir -p artifacts
+
+          echo "Buildroot version:"
+          git describe --always --dirty > artifacts/buildroot-version.txt
+
+          echo "Buildroot commit:"
+          git rev-parse HEAD >> artifacts/buildroot-version.txt
+
+          echo "Linux source:"
+          LINUX_DIR=$(find output/build \
+            -maxdepth 1 \
+            -type d \
+            -name 'linux-*' \
+            | head -n 1)
+
+          echo "$LINUX_DIR" > artifacts/linux-source-path.txt
+
+          echo
+          echo "Buildroot configuration:"
+          cp output/.config artifacts/buildroot.config
+
+          echo
+          echo "Linux configuration:"
+          cp "$LINUX_DIR/.config" artifacts/linux.config
+
+      # ------------------------------------------------------------
+      # Kernel image
+      # ------------------------------------------------------------
+      - name: Collect kernel image
+        run: |
+          cp output/images/bzImage \
+             artifacts/bzImage
+
+      # ------------------------------------------------------------
+      # Root filesystem
+      # ------------------------------------------------------------
+      - name: Collect root filesystem
+        run: |
+          cp output/images/rootfs.ext2 \
+             artifacts/rootfs.ext2
+
+      # ------------------------------------------------------------
+      # Archive Linux source tree
+      #
+      # The archive contains the exact extracted Linux tree used
+      # during the Buildroot build, including .config.
+      # ------------------------------------------------------------
+      - name: Archive Linux source
+        run: |
+          LINUX_DIR=$(find output/build \
+            -maxdepth 1 \
+            -type d \
+            -name 'linux-*' \
+            | head -n 1)
+
+          if [ -z "$LINUX_DIR" ]; then
+            echo "ERROR: Linux source directory not found"
+            exit 1
+          fi
+
+          echo "Archiving:"
+          echo "$LINUX_DIR"
+
+          tar \
+            --create \
+            --bzip2 \
+            --file=artifacts/linux-source.tar.bz2 \
+            --directory="$(dirname "$LINUX_DIR")" \
+            "$(basename "$LINUX_DIR")"
+
+      # ------------------------------------------------------------
+      # Display artifacts
+      # ------------------------------------------------------------
+      - name: List artifacts
+        run: |
+          echo "========================================"
+          echo "Generated artifacts"
+          echo "========================================"
+
+          ls -lh artifacts/
+
+          echo
+          echo "Linux source archive:"
+          du -h artifacts/linux-source.tar.bz2
+
+      # ------------------------------------------------------------
+      # Upload everything
+      # ------------------------------------------------------------
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: buildroot-qemu-x86_64
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 30
+
+
