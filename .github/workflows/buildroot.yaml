@@ -81,7 +81,7 @@ jobs:
 
           echo
           echo "Buildroot configuration:"
-          cp output/.config artifacts/buildroot.config
+          cp .config artifacts/buildroot.config
 
           echo
           echo "Linux configuration:"
